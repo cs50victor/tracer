@@ -1,0 +1,6 @@
+- intelligent diffs to reduce time reviewing code ( as LLMs write more code ) 
+- minimize visual noise
+- eliminate scrolling through a huge codebase / diff by ordering the changes more semantically and logically ( vs naively using the filenames )
+- dramatically lower the time to ramp up on an entirely new codebase or track down a bug with little to no prior experience in the codebase. 
+- convey only critical information to the engineer
+- why now: model inference is getting a lot faster and with recently added max tier subscriptions from big model labs the amortized cost per request is pennies. 
