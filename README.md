@@ -1,13 +1,14 @@
 # Tracer
 
-Terminal UI for reviewing git diffs with intelligent navigation and AI-powered analysis.
+Terminal UI to speed up code reviews & debugging.
+
 ![Tracer Example](./.github/assets/2.jpeg)
 
 ## What it does
 
 Syntax-highlighted diff viewer with multiple navigation modes and optional AI classification of changes. Navigate by file, by hunk, or let AI sort changes by importance (breaking changes first, then features, fixes, etc).
 
-**Intelligent mode is optimized for large PRs/diffs** where semantic ordering and automatic prioritization save significant review time. For small changes (a few files), manual review is typically faster than waiting for AI analysis. The real value emerges when reviewing:
+**Intelligent mode is optimized for large PRs/diffs** where semantic ordering and automatic prioritization save significant review time. For small changes (a few files), manual review is typically faster than waiting for AI analysis. The real value emerges in these scenerios:
 - Large PRs with dozens of files
 - Unfamiliar codebases where you need context quickly
 - Complex refactors where understanding the critical path matters
