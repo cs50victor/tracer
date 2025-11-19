@@ -1111,6 +1111,33 @@ function App({ parsedFiles }: AppProps) {
 
 
 
+async function fetchGitHubPRDiff(url: string): Promise<string | null> {
+  const diffUrl = url.endsWith(".diff") ? url : `${url}.diff`;
+
+  try {
+    const response = await fetch(diffUrl);
+    if (response.ok) {
+      const diff = await response.text();
+      return diff.replace(/^(---|\+\+\+) [ab]\//gm, '$1 ');
+    }
+  } catch {}
+
+  const prMatch = url.match(/\/pull\/(\d+)/);
+  const repoMatch = url.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+
+  if (prMatch && repoMatch) {
+    try {
+      const { stdout } = await execAsync(
+        `gh pr diff ${prMatch[1]} --repo ${repoMatch[1]}/${repoMatch[2]}`,
+        { encoding: "utf-8" }
+      );
+      return stdout.replace(/^(---|\+\+\+) [ab]\//gm, '$1 ');
+    } catch {}
+  }
+
+  return null;
+}
+
 cli
   .command(
     "[ref]",
@@ -1129,7 +1156,7 @@ cli
       const gitCommand = (() => {
         if (options.staged) return "git diff --cached --no-prefix";
         if (options.commit) return `git show ${options.commit} --no-prefix`;
-        if (ref) return `git show ${ref} --no-prefix`;
+        if (ref && !ref.startsWith("https://")) return `git show ${ref} --no-prefix`;
         return "git add -N . && git diff --no-prefix";
       })();
 
@@ -1155,11 +1182,11 @@ cli
         useEffect(() => {
           const fetchDiff = async () => {
             try {
-              const { stdout: diff } = await execAsync(gitCommand, {
-                encoding: "utf-8",
-              });
+              const diff = ref && ref.startsWith("https://github.com") && ref.includes("/pull/")
+                ? await fetchGitHubPRDiff(ref)
+                : (await execAsync(gitCommand, { encoding: "utf-8" })).stdout;
 
-              if (!diff.trim()) {
+              if (!diff || !diff.trim()) {
                 setParsedFiles([]);
                 return;
               }
