@@ -5,6 +5,10 @@
   "version": "0.0.1",
   "private": false,
   "bin": "./src/cli.tsx",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cs50victor/tracer.git"
+  },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
