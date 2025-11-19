@@ -6,6 +6,12 @@ Terminal UI for reviewing git diffs with intelligent navigation and AI-powered a
 
 Syntax-highlighted diff viewer with multiple navigation modes and optional AI classification of changes. Navigate by file, by hunk, or let AI sort changes by importance (breaking changes first, then features, fixes, etc).
 
+**Intelligent mode is optimized for large PRs/diffs** where semantic ordering and automatic prioritization save significant review time. For small changes (a few files), manual review is typically faster than waiting for AI analysis. The real value emerges when reviewing:
+- Large PRs with dozens of files
+- Unfamiliar codebases where you need context quickly
+- Complex refactors where understanding the critical path matters
+- Diffs where LLM-generated code needs efficient human verification
+
 ## Usage
 
 ```bash
@@ -41,5 +47,7 @@ git difftool
 - `q` or `esc` - Quit
 
 ---
+
+**Early experimentation:** This tool is in active exploration of how AI can reduce PR review time. Design ideas and implementation feedback are welcome.
 
 Scaffolded from [critique](https://github.com/remorses/critique).

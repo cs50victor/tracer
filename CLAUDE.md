@@ -13,6 +13,7 @@ Tracer is a CLI tool for reviewing diffs/PRs with intelligent navigation and AI-
 bun src/cli.tsx                    # Run CLI (don't run the TUI app directly - it will hang)
 bun --watch src/cli.tsx            # Watch mode
 bun add <package>                  # Install packages (never use npm)
+bun run prepublishonly             # Run TypeScript type checking (currently has 15 errors in MVP phase)
 
 # Usage
 tracer [ref]                       # Show diff (defaults to unstaged changes)
@@ -82,6 +83,11 @@ constructor(options: Options) {
 
 ## Development Workflow
 
+### Testing & CI
+- CI runs on every push (smoke test with `--help`)
+- TypeScript type checking currently disabled in CI (15 errors deferred until post-MVP)
+- Publishing to npm happens via GitHub Actions on release with provenance signing
+
 ### Research Patterns
 Can use gitchamber.com to read GitHub repositories:
 ```bash
@@ -107,6 +113,11 @@ After meaningful changes:
 - Uses Shiki with `github-dark-default` theme
 - Language detection from file extensions
 - Stateful highlighting maintains grammar state across lines for accuracy
+- 19 languages pre-loaded (common web/systems languages)
+
+### Editor Integration
+- Press Enter on a diff line to open file at that line number in your editor
+- Controlled by REACT_EDITOR environment variable (e.g., `code`, `vim`, `nvim`)
 
 ### Word-Level Diffs
 - Calculates Levenshtein distance similarity between removed/added line pairs
