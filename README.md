@@ -10,7 +10,18 @@ Syntax-highlighted diff viewer with multiple navigation modes and optional AI cl
 - Large PRs with dozens of files
 - Unfamiliar codebases where you need context quickly
 - Complex refactors where understanding the critical path matters
+- Small teams with very fast changing codebases
 - Diffs where LLM-generated code needs efficient human verification
+
+## Installation
+
+```bash
+# Quick use (no installation)
+bunx @cs50victor/tracer
+
+# Install or update
+bun install -g @cs50victor/tracer
+```
 
 ## Usage
 
