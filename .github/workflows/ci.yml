@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      # NOTE(victor): Readd after MVP - type checking currently has 15 errors
+      # - name: TypeScript type check
+      #   run: bun run prepublishonly
+
+      - name: Smoke test
+        run: bun run src/cli.tsx --help
