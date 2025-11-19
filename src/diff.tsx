@@ -194,7 +194,7 @@ class ErrorBoundary extends Component<
     }
   }
 
-  override render(): any {
+  override render(): ReactNode {
     if (this.state.hasError && this.state.error) {
       return (
         <box style={{ flexDirection: "column", padding: 2 }}>
@@ -513,7 +513,7 @@ const StructuredDiff = ({
     let oldLineNumber = startingLineNumber;
     let newLineNumber = startingLineNumber;
     const result: Array<{
-      code: any;
+      code: ReactNode;
       type: string;
       oldLineNumber: number;
       newLineNumber: number;
@@ -799,9 +799,19 @@ const StructuredDiff = ({
 
   // Split view: separate left (removals) and right (additions)
   // Build rows by pairing deletions with additions
+  interface SplitLineSide {
+    lineNumber: string;
+    code: ReactNode;
+    type: string;
+    key?: string;
+    snippetId: string | null;
+    oldLineNumber?: number;
+    newLineNumber?: number;
+  }
+
   const splitLines: Array<{
-    left: any;
-    right: any;
+    left: SplitLineSide;
+    right: SplitLineSide;
   }> = [];
   const processedIndices = new Set<number>();
 

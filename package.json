@@ -1,10 +1,14 @@
 {
-  "name": "tracer",
+  "name": "@cs50victor/tracer",
   "module": "src/diff.tsx",
   "type": "module",
   "version": "0.0.1",
   "private": false,
   "bin": "./src/cli.tsx",
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "cli": "bun src/cli.tsx",
     "cli:watch": "bun --watch src/cli.tsx",

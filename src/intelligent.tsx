@@ -18,16 +18,19 @@ export type ClassificationType =
 
 export type RiskLevel = "high" | "medium" | "low";
 
-export interface FileAnalysis {
+export interface HunkAnalysis {
   file: string;
+  lineStart: number;
+  lineEnd: number;
+  description: string;
   classification: ClassificationType;
   risk: RiskLevel;
-  summary: string;
 }
 
 export interface AnalysisResult {
-  files: FileAnalysis[];
+  hunks: HunkAnalysis[];
   timestamp: number;
+  version?: string;
 }
 
 const CLASSIFICATION_PRIORITY: Record<ClassificationType, number> = {
@@ -41,23 +44,64 @@ const CLASSIFICATION_PRIORITY: Record<ClassificationType, number> = {
   unknown: 7,
 };
 
+const ANALYSIS_VERSION = "v2";
+
 export async function analyzeDiff(diffContent: string, model: string = "claude"): Promise<AnalysisResult> {
   try {
     const timestamp = Date.now();
-    const diffPath = join(tmpdir(), `tracer-${timestamp}.diff`);
+    const tempDir = tmpdir();
+    const diffPath = join(tempDir, `tracer-${timestamp}.diff`);
 
     fs.writeFileSync(diffPath, diffContent);
 
-    const prompt = `You are analyzing a git diff. Read the diff from ${diffPath} and classify each changed file.
+    const prompt = `You are analyzing a git diff for intelligent code review. Read the diff from ${diffPath}.
+
+Your job is to break changes into SMALL, LOGICAL segments and order them so an engineer can understand the entire changeset in ONE FORWARD PASS - like reading a story from beginning to end.
+
+CRITICAL RULES:
+1. Split large changes into bite-sized segments (never >150 lines)
+2. Use natural code boundaries: individual functions, class methods, import blocks, related constants
+3. Each segment should be understandable in <10 seconds
+
+NARRATIVE ORDERING (MOST IMPORTANT):
+The order you output hunks matters critically. The engineer will read top-to-bottom without jumping around.
+
+Order hunks to tell a coherent story:
+- If change B depends on change A, show A first
+- Group related changes together (don't split a feature across distant indexes)
+- Show foundational changes before things that build on them
+- Within a logical unit, prioritize: breaking > feature > fix > refactor > test > docs > style
+- Think: "What order minimizes confusion and backtracking?"
+
+Example good flow:
+1. Add new helper function (enables next changes)
+2. Update main logic to use helper (builds on #1)
+3. Add tests for new behavior (validates #2)
+4. Update docs (describes #1-3)
+
+Example bad flow:
+1. Add tests (user: "tests for what?")
+2. Update docs (user: "docs for what?")
+3. Add feature (user: "oh, that's what the tests were for - should've shown this first")
 
 Return ONLY valid JSON in this exact format (no markdown, no code blocks, no explanation):
 {
-  "files": [
+  "hunks": [
     {
       "file": "path/to/file",
-      "classification": "breaking|feature|refactor|fix|test|docs|style",
-      "risk": "high|medium|low",
-      "summary": "brief description"
+      "lineStart": 1,
+      "lineEnd": 22,
+      "description": "Import statements for React and Shiki",
+      "classification": "feature",
+      "risk": "low"
+    },
+    {
+      "file": "path/to/file",
+      "lineStart": 38,
+      "lineEnd": 95,
+      "description": "Add applyDimToCodeNode helper function",
+      "classification": "feature",
+      "risk": "medium"
     }
   ]
 }
@@ -76,11 +120,21 @@ Risk levels:
 - medium: New features, significant refactors
 - low: Tests, docs, style, minor fixes
 
+For each hunk:
+- file: the file path from the diff header
+- lineStart: starting line number in the NEW file (after changes)
+- lineEnd: ending line number in the NEW file (after changes)
+- description: what this specific segment does (be specific: "Add X function", "Fix Y bug", not "changes to file")
+- classification: type of change
+- risk: risk level
+
+Remember: The array order IS the reading order. Make it tell a clear, logical story.
+
 Analyze the diff and return the JSON now.`;
 
     const command = model === "codex"
-      ? `echo ${JSON.stringify(prompt)} | codex exec`
-      : `echo ${JSON.stringify(prompt)} | claude -p`;
+      ? `echo ${JSON.stringify(prompt)} | codex exec -C "${tempDir}" --skip-git-repo-check`
+      : `echo ${JSON.stringify(prompt)} | claude -p --add-dir "${tempDir}"`;
 
     const { stdout } = await execAsync(command, {
       encoding: "utf-8",
@@ -101,56 +155,34 @@ Analyze the diff and return the JSON now.`;
     fs.unlinkSync(diffPath);
 
     return {
-      files: result.files || [],
+      hunks: result.hunks || [],
       timestamp,
+      version: ANALYSIS_VERSION,
     };
   } catch (error) {
     console.error("Analysis error:", error);
     return {
-      files: [],
+      hunks: [],
       timestamp: Date.now(),
+      version: ANALYSIS_VERSION,
     };
   }
 }
 
 export function semanticSort(
-  files: Array<{ oldFileName?: string; newFileName?: string; hunks: any[] }>,
-  analysis: AnalysisResult
-): Array<{ oldFileName?: string; newFileName?: string; hunks: any[] }> {
-  const getFileName = (file: { oldFileName?: string; newFileName?: string }): string => {
-    const newName = file.newFileName;
-    const oldName = file.oldFileName;
-    if (newName && newName !== "/dev/null") return newName;
-    if (oldName && oldName !== "/dev/null") return oldName;
-    return "";
-  };
-
-  const analysisMap = new Map<string, FileAnalysis>();
-  for (const fileAnalysis of analysis.files) {
-    analysisMap.set(fileAnalysis.file, fileAnalysis);
-  }
-
-  return files.slice().sort((a, b) => {
-    const aName = getFileName(a);
-    const bName = getFileName(b);
-
-    const aAnalysis = analysisMap.get(aName);
-    const bAnalysis = analysisMap.get(bName);
-
-    const aPriority = aAnalysis
-      ? CLASSIFICATION_PRIORITY[aAnalysis.classification]
-      : CLASSIFICATION_PRIORITY.unknown;
-    const bPriority = bAnalysis
-      ? CLASSIFICATION_PRIORITY[bAnalysis.classification]
-      : CLASSIFICATION_PRIORITY.unknown;
+  hunks: HunkAnalysis[]
+): HunkAnalysis[] {
+  return hunks.slice().sort((a, b) => {
+    const aPriority = CLASSIFICATION_PRIORITY[a.classification];
+    const bPriority = CLASSIFICATION_PRIORITY[b.classification];
 
     if (aPriority !== bPriority) {
       return aPriority - bPriority;
     }
 
-    const aSize = a.hunks.reduce((sum, hunk) => sum + hunk.lines.length, 0);
-    const bSize = b.hunks.reduce((sum, hunk) => sum + hunk.lines.length, 0);
-    return aSize - bSize;
+    const aSize = a.lineEnd - a.lineStart;
+    const bSize = b.lineEnd - b.lineStart;
+    return bSize - aSize;
   });
 }
 
@@ -169,5 +201,5 @@ export function getClassificationTag(classification: ClassificationType): { labe
 }
 
 export function countBreaking(analysis: AnalysisResult): number {
-  return analysis.files.filter(f => f.classification === "breaking").length;
+  return analysis.hunks.filter(h => h.classification === "breaking").length;
 }

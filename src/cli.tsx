@@ -24,7 +24,7 @@ import fs from "fs";
 import { tmpdir, homedir } from "os";
 import { join } from "path";
 import { create } from "zustand";
-import { persist, createJSONStorage, StateStorage } from "zustand/middleware";
+import { persist, createJSONStorage, type StateStorage } from "zustand/middleware";
 import { TextAttributes } from "@opentui/core";
 import {
   analyzeDiff,
@@ -35,6 +35,8 @@ import {
 } from "./intelligent.tsx";
 import "opentui-spinner/react";
 import spinners from "cli-spinners";
+import type { StructuredPatchHunk } from "diff";
+import type { ExecSyncOptions } from "child_process";
 
 const execAsync = promisify(exec);
 
@@ -116,13 +118,13 @@ function getFileName(file: { oldFileName?: string; newFileName?: string }): stri
 
 function execSyncWithError(
   command: string,
-  options?: any,
-): { data?: any; error?: string } {
+  options?: ExecSyncOptions,
+): { data?: string | Buffer; error?: string } {
   try {
     const data = execSync(command, options);
     return { data };
-  } catch (error: any) {
-    const stderr = error.stderr?.toString() || error.message || String(error);
+  } catch (error: unknown) {
+    const stderr = (error as { stderr?: Buffer; message?: string }).stderr?.toString() || (error as Error).message || String(error);
     return { error: stderr };
   }
 }
@@ -247,7 +249,11 @@ function loadCachedAnalysis(
   if (index[repoDir]?.[commitKey] !== diffSha) {
     return null;
   }
-  return readAnalysisFile(diffSha);
+  const cached = readAnalysisFile(diffSha);
+  if (!cached || cached.version !== "v2") {
+    return null;
+  }
+  return cached;
 }
 
 function saveAnalysisCache(
@@ -288,6 +294,7 @@ interface DiffState {
   currentFileIndex: number;
   currentHunkIndex: number;
   mode: Mode;
+  preferredModel: "claude" | "codex";
   intelligentAnalysis: AnalysisResult | null;
   isAnalyzing: boolean;
 }
@@ -298,23 +305,26 @@ const useDiffStateStore = create<DiffState>()(
       currentFileIndex: 0,
       currentHunkIndex: 0,
       mode: Mode.HUNK_ONLY,
+      preferredModel: "claude",
       intelligentAnalysis: null,
       isAnalyzing: false,
     }),
     {
       name: "tracer-config",
       storage: createJSONStorage(() => fileSystemStorage),
-      partialize: (state) => ({ mode: state.mode }),
+      partialize: (state) => ({ mode: state.mode, preferredModel: state.preferredModel }),
     }
   )
 );
 
+interface ParsedFile {
+  oldFileName?: string;
+  newFileName?: string;
+  hunks: StructuredPatchHunk[];
+}
+
 interface AppProps {
-  parsedFiles: Array<{
-    oldFileName?: string;
-    newFileName?: string;
-    hunks: any[];
-  }>;
+  parsedFiles: ParsedFile[];
 }
 
 export interface DropdownOption {
@@ -350,7 +360,7 @@ const Dropdown = (props: DropdownProps) => {
   const [selected, setSelected] = useState(0);
   const [offset, setOffset] = useState(0);
   const [searchText, setSearchText] = useState("");
-  const inputRef = useRef<any>(null);
+  const inputRef = useRef(null);
 
   const inFocus = true;
 
@@ -580,11 +590,11 @@ function ItemOption(props: {
   );
 }
 
-function getTotalHunks(files: Array<{ hunks: any[] }>): number {
+function getTotalHunks(files: ParsedFile[]): number {
   return files.reduce((sum, file) => sum + file.hunks.length, 0);
 }
 
-function linearToFileHunk(files: Array<{ hunks: any[] }>, linearIndex: number): { fileIndex: number; hunkIndex: number } {
+function linearToFileHunk(files: ParsedFile[], linearIndex: number): { fileIndex: number; hunkIndex: number } {
   let remaining = linearIndex;
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
     const hunkCount = files[fileIndex]?.hunks.length || 0;
@@ -597,12 +607,111 @@ function linearToFileHunk(files: Array<{ hunks: any[] }>, linearIndex: number): 
   return { fileIndex: files.length - 1, hunkIndex: lastFile ? lastFile.hunks.length - 1 : 0 };
 }
 
-function fileHunkToLinear(files: Array<{ hunks: any[] }>, fileIndex: number, hunkIndex: number): number {
+function fileHunkToLinear(files: ParsedFile[], fileIndex: number, hunkIndex: number): number {
   let linear = 0;
   for (let i = 0; i < fileIndex; i++) {
     linear += files[i]?.hunks.length || 0;
   }
   return linear + hunkIndex;
+}
+
+function transformFilesWithIntelligentHunks(
+  parsedFiles: ParsedFile[],
+  analysis: AnalysisResult
+): ParsedFile[] {
+  const transformedFiles: ParsedFile[] = [];
+
+  for (const file of parsedFiles) {
+    const fileName = getFileName(file);
+    if (!fileName) continue;
+
+    const fileSegments = analysis.hunks
+      .filter(h => h.file === fileName)
+      .sort((a, b) => a.lineStart - b.lineStart);
+
+    if (fileSegments.length === 0) {
+      transformedFiles.push(file);
+      continue;
+    }
+
+    const syntheticHunks = [];
+
+    for (const segment of fileSegments) {
+      for (const originalHunk of file.hunks) {
+        const hunkStart = originalHunk.newStart;
+        const hunkEnd = originalHunk.newStart + originalHunk.newLines - 1;
+
+        if (segment.lineStart <= hunkEnd && segment.lineEnd >= hunkStart) {
+          let currentNewLine = originalHunk.newStart;
+          let currentOldLine = originalHunk.oldStart;
+          const segmentLines = [];
+          let segmentOldStart = -1;
+          let capturing = false;
+
+          for (const line of originalHunk.lines) {
+            const lineType = line[0];
+            let shouldCapture = false;
+
+            if (lineType === '-') {
+              shouldCapture = capturing;
+              currentOldLine++;
+            } else if (lineType === '+' || lineType === ' ') {
+              if (currentNewLine >= segment.lineStart && currentNewLine <= segment.lineEnd) {
+                shouldCapture = true;
+                if (!capturing) {
+                  capturing = true;
+                  segmentOldStart = currentOldLine;
+                }
+              } else if (capturing && currentNewLine > segment.lineEnd) {
+                break;
+              }
+              currentNewLine++;
+              if (lineType === ' ') {
+                currentOldLine++;
+              }
+            }
+
+            if (shouldCapture) {
+              segmentLines.push(line);
+            }
+          }
+
+          if (segmentLines.length > 0) {
+            let newLines = 0;
+            let oldLines = 0;
+
+            for (const line of segmentLines) {
+              if (line[0] === '+') {
+                newLines++;
+              } else if (line[0] === '-') {
+                oldLines++;
+              } else {
+                newLines++;
+                oldLines++;
+              }
+            }
+
+            syntheticHunks.push({
+              ...originalHunk,
+              oldStart: segmentOldStart,
+              newStart: segment.lineStart,
+              oldLines,
+              newLines,
+              lines: segmentLines,
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    transformedFiles.push({
+      ...file,
+      hunks: syntheticHunks.length > 0 ? syntheticHunks : file.hunks,
+    });
+  }
+
+  return transformedFiles;
 }
 
 function App({ parsedFiles }: AppProps) {
@@ -614,6 +723,10 @@ function App({ parsedFiles }: AppProps) {
   const intelligentAnalysis = useDiffStateStore((s) => s.intelligentAnalysis);
   const isAnalyzing = useDiffStateStore((s) => s.isAnalyzing);
   const [showDropdown, setShowDropdown] = useState(false);
+
+  const displayFiles = mode === Mode.INTELLIGENT && intelligentAnalysis && !isAnalyzing
+    ? transformFilesWithIntelligentHunks(parsedFiles, intelligentAnalysis)
+    : parsedFiles;
 
   useOnResize(
     useCallback((newWidth: number) => {
@@ -668,13 +781,13 @@ function App({ parsedFiles }: AppProps) {
       }
       if (key.name === "down") {
         useDiffStateStore.setState((state) => ({
-          currentFileIndex: Math.min(parsedFiles.length - 1, state.currentFileIndex + 1),
+          currentFileIndex: Math.min(displayFiles.length - 1, state.currentFileIndex + 1),
           currentHunkIndex: 0,
         }));
       }
     } else if (mode === Mode.HUNK_NAVIGATION) {
       if (key.name === "up") {
-        const currentFile = parsedFiles[currentFileIndex];
+        const currentFile = displayFiles[currentFileIndex];
         if (currentFile) {
           useDiffStateStore.setState((state) => ({
             currentHunkIndex: Math.max(0, state.currentHunkIndex - 1),
@@ -682,7 +795,7 @@ function App({ parsedFiles }: AppProps) {
         }
       }
       if (key.name === "down") {
-        const currentFile = parsedFiles[currentFileIndex];
+        const currentFile = displayFiles[currentFileIndex];
         if (currentFile) {
           useDiffStateStore.setState((state) => ({
             currentHunkIndex: Math.min(currentFile.hunks.length - 1, state.currentHunkIndex + 1),
@@ -697,43 +810,43 @@ function App({ parsedFiles }: AppProps) {
       }
       if (key.name === "right") {
         useDiffStateStore.setState((state) => ({
-          currentFileIndex: Math.min(parsedFiles.length - 1, state.currentFileIndex + 1),
+          currentFileIndex: Math.min(displayFiles.length - 1, state.currentFileIndex + 1),
           currentHunkIndex: 0,
         }));
       }
     } else if (mode === Mode.HUNK_ONLY) {
-      const totalHunks = getTotalHunks(parsedFiles);
+      const totalHunks = getTotalHunks(displayFiles);
       if (key.name === "left") {
         useDiffStateStore.setState((state) => {
-          const currentLinear = fileHunkToLinear(parsedFiles, state.currentFileIndex, state.currentHunkIndex);
+          const currentLinear = fileHunkToLinear(displayFiles, state.currentFileIndex, state.currentHunkIndex);
           const newLinear = Math.max(0, currentLinear - 1);
-          const { fileIndex, hunkIndex } = linearToFileHunk(parsedFiles, newLinear);
+          const { fileIndex, hunkIndex } = linearToFileHunk(displayFiles, newLinear);
           return { currentFileIndex: fileIndex, currentHunkIndex: hunkIndex };
         });
       }
       if (key.name === "right") {
         useDiffStateStore.setState((state) => {
-          const currentLinear = fileHunkToLinear(parsedFiles, state.currentFileIndex, state.currentHunkIndex);
+          const currentLinear = fileHunkToLinear(displayFiles, state.currentFileIndex, state.currentHunkIndex);
           const newLinear = Math.min(totalHunks - 1, currentLinear + 1);
-          const { fileIndex, hunkIndex } = linearToFileHunk(parsedFiles, newLinear);
+          const { fileIndex, hunkIndex } = linearToFileHunk(displayFiles, newLinear);
           return { currentFileIndex: fileIndex, currentHunkIndex: hunkIndex };
         });
       }
     } else if (mode === Mode.INTELLIGENT) {
-      const totalHunks = getTotalHunks(parsedFiles);
+      const totalHunks = getTotalHunks(displayFiles);
       if (key.name === "left") {
         useDiffStateStore.setState((state) => {
-          const currentLinear = fileHunkToLinear(parsedFiles, state.currentFileIndex, state.currentHunkIndex);
+          const currentLinear = fileHunkToLinear(displayFiles, state.currentFileIndex, state.currentHunkIndex);
           const newLinear = Math.max(0, currentLinear - 1);
-          const { fileIndex, hunkIndex } = linearToFileHunk(parsedFiles, newLinear);
+          const { fileIndex, hunkIndex } = linearToFileHunk(displayFiles, newLinear);
           return { currentFileIndex: fileIndex, currentHunkIndex: hunkIndex };
         });
       }
       if (key.name === "right") {
         useDiffStateStore.setState((state) => {
-          const currentLinear = fileHunkToLinear(parsedFiles, state.currentFileIndex, state.currentHunkIndex);
+          const currentLinear = fileHunkToLinear(displayFiles, state.currentFileIndex, state.currentHunkIndex);
           const newLinear = Math.min(totalHunks - 1, currentLinear + 1);
-          const { fileIndex, hunkIndex } = linearToFileHunk(parsedFiles, newLinear);
+          const { fileIndex, hunkIndex } = linearToFileHunk(displayFiles, newLinear);
           return { currentFileIndex: fileIndex, currentHunkIndex: hunkIndex };
         });
       }
@@ -743,8 +856,8 @@ function App({ parsedFiles }: AppProps) {
   const { FileEditPreview } = require("./diff.tsx");
 
   // Ensure current index is valid
-  const validIndex = Math.min(currentFileIndex, parsedFiles.length - 1);
-  const currentFile = parsedFiles[validIndex];
+  const validIndex = Math.min(currentFileIndex, displayFiles.length - 1);
+  const currentFile = displayFiles[validIndex];
   const currentHunkIndex = useDiffStateStore((s) => s.currentHunkIndex);
 
   if (!currentFile) {
@@ -769,7 +882,7 @@ function App({ parsedFiles }: AppProps) {
       });
     }
   } else {
-    currentFile.hunks.forEach((hunk: any) => {
+    currentFile.hunks.forEach((hunk: StructuredPatchHunk) => {
       hunk.lines.forEach((line: string) => {
         if (line.startsWith("+")) additions++;
         if (line.startsWith("-")) deletions++;
@@ -777,7 +890,7 @@ function App({ parsedFiles }: AppProps) {
     });
   }
 
-  const dropdownOptions = parsedFiles.map((file, idx) => {
+  const dropdownOptions = displayFiles.map((file, idx) => {
     const name = getFileName(file) || "";
     return {
       title: name,
@@ -829,19 +942,6 @@ function App({ parsedFiles }: AppProps) {
             <spinner type={spinners.bouncingBall} color="#FFA500" />
           </>
         )}
-        {mode === Mode.INTELLIGENT && !isAnalyzing && intelligentAnalysis && (() => {
-          const fileAnalysis = intelligentAnalysis.files.find(f => f.file === fileName);
-          if (fileAnalysis) {
-            const tag = getClassificationTag(fileAnalysis.classification);
-            return (
-              <>
-                <text fg="#666666"> | </text>
-                <text fg={tag.color}>{tag.label}</text>
-              </>
-            );
-          }
-          return null;
-        })()}
         {MODE_CONFIG[mode].showSingleHunk && (
           <>
             <text fg="#666666"> | Hunk </text>
@@ -854,6 +954,50 @@ function App({ parsedFiles }: AppProps) {
         <box flexGrow={1} />
         <text fg="#ffffff">→</text>
       </box>
+
+      {/* Intelligent summary section */}
+      {mode === Mode.INTELLIGENT && !isAnalyzing && intelligentAnalysis && currentHunk && (() => {
+        const hunkStart = currentHunk.newStart || 0;
+        const hunkAnalysis = intelligentAnalysis.hunks.find(h =>
+          h.file === fileName &&
+          hunkStart >= h.lineStart &&
+          hunkStart <= h.lineEnd
+        );
+        if (hunkAnalysis) {
+          const tag = getClassificationTag(hunkAnalysis.classification);
+          return (
+            <box style={{
+              paddingTop: 2,
+              paddingBottom: 2,
+              paddingLeft: 2,
+              paddingRight: 2,
+              marginBottom: 2,
+              flexShrink: 0,
+              flexDirection: "column",
+              backgroundColor: "#1a1a1a",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <box style={{ flexDirection: "row", alignItems: "center" }}>
+                <text fg={tag.color} >{tag.label}</text>
+                <text fg="#666666"> | </text>
+                <text fg="#999999">Risk: </text>
+                <text fg={
+                  hunkAnalysis.risk === "high" ? "#ff0000" :
+                  hunkAnalysis.risk === "medium" ? "#ffaa00" :
+                  "#00ff00"
+                }>{hunkAnalysis.risk}</text>
+              </box>
+              {hunkAnalysis.description && (
+                <box style={{ paddingTop: 1 }}>
+                  <text fg="#cccccc">{hunkAnalysis.description}</text>
+                </box>
+              )}
+            </box>
+          );
+        }
+        return null;
+      })()}
 
       <scrollbox
         scrollAcceleration={scrollAcceleration}
@@ -900,7 +1044,7 @@ function App({ parsedFiles }: AppProps) {
             <text fg="#666666"> | </text>
             <text fg="#ffffff">ctrl p</text>
             <text fg="#666666"> select</text>
-            <text fg="#666666"> ({validIndex + 1}/{parsedFiles.length})</text>
+            <text fg="#666666"> ({validIndex + 1}/{displayFiles.length})</text>
             <box flexGrow={1} />
             <text fg="#666666">next file </text>
             <text fg="#ffffff">↓</text>
@@ -920,7 +1064,7 @@ function App({ parsedFiles }: AppProps) {
             <text fg="#666666"> | </text>
             <text fg="#ffffff">ctrl p</text>
             <text fg="#666666"> select</text>
-            <text fg="#666666"> ({validIndex + 1}/{parsedFiles.length})</text>
+            <text fg="#666666"> ({validIndex + 1}/{displayFiles.length})</text>
             <box flexGrow={1} />
             <text fg="#666666">next hunk </text>
             <text fg="#ffffff">↓</text>
@@ -937,7 +1081,7 @@ function App({ parsedFiles }: AppProps) {
             <text fg="#666666"> | </text>
             <text fg="#ffffff">ctrl p</text>
             <text fg="#666666"> select</text>
-            <text fg="#666666"> ({fileHunkToLinear(parsedFiles, validIndex, validHunkIndex) + 1}/{getTotalHunks(parsedFiles)})</text>
+            <text fg="#666666"> ({fileHunkToLinear(displayFiles, validIndex, validHunkIndex) + 1}/{getTotalHunks(displayFiles)})</text>
             <box flexGrow={1} />
             <text fg="#666666">next hunk </text>
             <text fg="#ffffff">→</text>
@@ -951,29 +1095,10 @@ function App({ parsedFiles }: AppProps) {
             <text fg="#ffffff">m</text>
             <text fg="#666666"> mode: </text>
             <text fg="#FFA500">INTELLIGENT</text>
-            {isAnalyzing && (
-              <>
-                <text fg="#666666"> | </text>
-                <spinner type={spinners.bouncingBall} color="#FFA500" />
-                <text fg="#FFA500"> Analyzing...</text>
-              </>
-            )}
-            {!isAnalyzing && intelligentAnalysis && (() => {
-              const breakingCount = countBreaking(intelligentAnalysis);
-              if (breakingCount > 0) {
-                return (
-                  <>
-                    <text fg="#666666"> | </text>
-                    <text fg="#ff0000">{breakingCount} breaking</text>
-                  </>
-                );
-              }
-              return null;
-            })()}
             <text fg="#666666"> | </text>
             <text fg="#ffffff">ctrl p</text>
             <text fg="#666666"> select</text>
-            <text fg="#666666"> ({fileHunkToLinear(parsedFiles, validIndex, validHunkIndex) + 1}/{getTotalHunks(parsedFiles)})</text>
+            <text fg="#666666"> ({fileHunkToLinear(displayFiles, validIndex, validHunkIndex) + 1}/{getTotalHunks(displayFiles)})</text>
             <box flexGrow={1} />
             <text fg="#666666">next hunk </text>
             <text fg="#ffffff">→</text>
@@ -1014,20 +1139,16 @@ cli
       ]);
 
       const shouldWatch = options.watch && !ref && !options.commit;
-      const selectedModel = options.model || "claude";
+      const selectedModel = options.model || useDiffStateStore.getState().preferredModel || "claude";
+
+      if (options.model) {
+        useDiffStateStore.setState({ preferredModel: options.model });
+      }
 
       function AppWithWatch() {
-        const [parsedFiles, setParsedFiles] = useState<Array<{
-          oldFileName?: string;
-          newFileName?: string;
-          hunks: any[];
-        }> | null>(null);
+        const [parsedFiles, setParsedFiles] = useState<ParsedFile[] | null>(null);
         const [gitDiff, setGitDiff] = useState<string>("");
-        const [filteredFiles, setFilteredFiles] = useState<Array<{
-          oldFileName?: string;
-          newFileName?: string;
-          hunks: any[];
-        }>>([]);
+        const [filteredFiles, setFilteredFiles] = useState<ParsedFile[]>([]);
         const mode = useDiffStateStore((s) => s.mode);
         const isAnalyzing = useDiffStateStore((s) => s.isAnalyzing);
 
@@ -1092,8 +1213,7 @@ cli
 
             const currentAnalysis = useDiffStateStore.getState().intelligentAnalysis;
             if (currentAnalysis) {
-              const sortedFiles = semanticSort(filteredFiles, currentAnalysis);
-              setParsedFiles(sortedFiles);
+              setParsedFiles(filteredFiles);
               return;
             }
 
@@ -1102,7 +1222,7 @@ cli
             const commitKey = getCommitKey(options, ref);
             const diffSha = crypto
               .createHash("sha1")
-              .update(`${selectedModel}:${gitDiff}`)
+              .update(`v2:${selectedModel}:${gitDiff}`)
               .digest("hex");
 
             if (repoDir && commitKey) {
@@ -1112,8 +1232,7 @@ cli
                   intelligentAnalysis: cached,
                   isAnalyzing: false,
                 });
-                const sortedFiles = semanticSort(filteredFiles, cached);
-                setParsedFiles(sortedFiles);
+                setParsedFiles(filteredFiles);
                 return;
               }
             }
@@ -1128,8 +1247,7 @@ cli
               intelligentAnalysis: analysis,
               isAnalyzing: false,
             });
-            const sortedFiles = semanticSort(filteredFiles, analysis);
-            setParsedFiles(sortedFiles);
+            setParsedFiles(filteredFiles);
           };
 
           runAnalysis();
@@ -1172,7 +1290,7 @@ cli
             <box style={{ padding: 1, backgroundColor: BACKGROUND_COLOR, height: "100%", justifyContent: "center", alignItems: "center" }}>
               <box style={{ flexDirection: "row", alignItems: "center" }}>
                 <spinner type={spinners.bouncingBall} color="#FFA500" />
-                <text> Analyzing...</text>
+                <text> Analyzing diff...</text>
               </box>
             </box>
           );
