@@ -1,6 +1,7 @@
 # Tracer
 
 Terminal UI for reviewing git diffs with intelligent navigation and AI-powered analysis.
+![Tracer Example](./.github/assets/2.jpeg)
 
 ## What it does
 
@@ -58,7 +59,7 @@ git difftool
 - `q` or `esc` - Quit
 
 ---
-
-**Early experimentation:** This tool is in active exploration of how AI can reduce PR review time. Design ideas and implementation feedback are welcome.
+> [!IMPORTANT]
+> This tool is in active exploration of how AI can reduce PR review time. Design ideas and implementation feedback are welcome.
 
 Scaffolded from [critique](https://github.com/remorses/critique).
