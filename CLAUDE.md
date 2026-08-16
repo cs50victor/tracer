@@ -13,7 +13,8 @@ Tracer is a CLI tool for reviewing diffs/PRs with intelligent navigation and AI-
 bun src/cli.tsx                    # Run CLI (don't run the TUI app directly - it will hang)
 bun --watch src/cli.tsx            # Watch mode
 bun add <package>                  # Install packages (never use npm)
-bun run prepublishonly             # Run TypeScript type checking (currently has 15 errors in MVP phase)
+bun run typecheck                  # Run TypeScript type checking (currently has 15 errors in MVP phase)
+bun test                           # Run focused tests
 
 # Usage
 tracer [ref]                       # Show diff (defaults to unstaged changes)
@@ -27,7 +28,11 @@ tracer pick <branch>               # Pick files from another branch
 ## Architecture
 
 ### File Structure
-- `src/cli.tsx` - CLI entry point, commands, React TUI app, navigation logic
+- `src/entry.ts` - Lightweight CLI/MCP dispatcher
+- `src/cli.tsx` - Diff commands, React TUI app, navigation logic
+- `src/mcp.ts` - Stdio MCP server and tool contracts
+- `src/checklist.ts` - Concurrent JSON walkthrough state
+- `src/viewer.ts` - Ghostty, bat, and GitHub CLI preview integration
 - `src/diff.tsx` - Diff rendering with syntax highlighting (Shiki), word-level diffs, split view
 - `src/intelligent.tsx` - AI-powered diff analysis (Claude/Codex integration)
 

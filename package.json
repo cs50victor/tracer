@@ -2,27 +2,37 @@
   "name": "@cs50victor/tracer",
   "module": "src/diff.tsx",
   "type": "module",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": false,
-  "bin": "./src/cli.tsx",
+  "bin": {
+    "tracer": "src/entry.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "CHANGELOG.md"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/cs50victor/tracer.git"
+    "url": "git+https://github.com/cs50victor/tracer.git"
   },
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "cli": "bun src/cli.tsx",
-    "cli:watch": "bun --watch src/cli.tsx",
-    "prepublishonly": "tsc"
+    "cli": "bun src/entry.ts",
+    "cli:watch": "bun --watch src/entry.ts",
+    "test": "bun test",
+    "typecheck": "tsc",
+    "prepublishOnly": "bun test"
   },
   "devDependencies": {
     "@types/bun": "1.3.1",
     "typescript": "^5.9.3"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@opentui/core": "^0.1.45",
     "@opentui/react": "^0.1.45",
     "@shikijs/langs": "^3.15.0",
@@ -33,6 +43,7 @@
     "react": "^19.2.0",
     "react-error-boundary": "^6.0.0",
     "shiki": "^3.15.0",
+    "zod": "3.25.76",
     "zustand": "^5.0.8"
   }
 }

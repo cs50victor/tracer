@@ -17,9 +17,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # NOTE(victor): Readd after MVP - type checking currently has 15 errors
+      # NOTE(victor): Re-add after the existing MVP type errors are resolved.
       # - name: TypeScript type check
-      #   run: bun run prepublishonly
+      #   run: bun run typecheck
 
-      - name: Smoke test
-        run: bun run src/cli.tsx --help
+      - name: Test
+        run: bun test
+
+      - name: CLI smoke test
+        run: bun run src/entry.ts --help

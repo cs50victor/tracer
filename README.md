@@ -21,8 +21,15 @@ Syntax-highlighted diff viewer with multiple navigation modes and optional AI cl
 # Quick use (no installation)
 bunx @cs50victor/tracer
 
-# Install or update
+# Install or update with Bun
 bun install -g @cs50victor/tracer
+
+# Install with Homebrew
+brew tap cs50victor/tap
+brew install tracer
+
+# Ghostty hosts code previews on macOS
+brew install --cask ghostty
 ```
 
 ## Usage
@@ -51,6 +58,34 @@ git config --global diff.tool tracer
 git config --global difftool.tracer.cmd 'tracer difftool "$LOCAL" "$REMOTE"'
 git difftool
 ```
+
+## MCP server
+
+`tracer mcp` starts a stdio MCP server for agent-guided code walkthroughs. Add it to an MCP client with:
+
+```json
+{
+  "mcpServers": {
+    "tracer": {
+      "command": "tracer",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The server exposes four tools:
+
+- `highlight_code_region` opens a local file range or the latest diff for a GitHub pull request in Ghostty. `bat` renders and highlights the content; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
+- `initialize_directory_checklist` writes the Git-respected file list to `.tracer/walkthrough.json` in the selected directory.
+- `mark_file_explained` atomically records that a file has been explained.
+- `list_directory_checklist` returns open, done, or all files with pagination and aggregate counts.
+
+Completion records are separate, exclusive-create JSON markers under `.tracer/explained/`. Multiple agents and multiple MCP server processes can safely use the same checklist at once.
+
+Tool failures use structured JSON with `code`, `message`, and raw command details such as `stderr` and `exit_code` when available.
+
+The Homebrew formula installs `bat` and `gh`. Ghostty is a separate cask because Homebrew formulae cannot depend on graphical casks.
 
 ## Navigation
 

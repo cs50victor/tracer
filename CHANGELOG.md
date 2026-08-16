@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0
+
+- mcp
+  - Add `tracer mcp` with tools for code highlighting and directory walkthrough checklists.
+  - Support concurrent agents through atomic manifests and per-file completion markers.
+  - Return explicit view-conflict ownership and structured raw command failures to agents.
+  - Fetch the latest pull request diff with `gh` and render local or remote ranges with `bat` in Ghostty.
+- distribution
+  - Add tagged macOS and Linux binary releases for Homebrew.
+
 ## 0.0.1
 
 - tracer

@@ -37,6 +37,7 @@ import "opentui-spinner/react";
 import spinners from "cli-spinners";
 import type { StructuredPatchHunk } from "diff";
 import type { ExecSyncOptions } from "child_process";
+import { VERSION } from "./version.ts";
 
 const execAsync = promisify(exec);
 
@@ -853,8 +854,6 @@ function App({ parsedFiles }: AppProps) {
     }
   });
 
-  const { FileEditPreview } = require("./diff.tsx");
-
   // Ensure current index is valid
   const validIndex = Math.min(currentFileIndex, displayFiles.length - 1);
   const currentFile = displayFiles[validIndex];
@@ -1595,5 +1594,5 @@ cli
   });
 
 cli.help();
-cli.version("1.0.0");
+cli.version(VERSION);
 cli.parse();
