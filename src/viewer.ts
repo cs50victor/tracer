@@ -165,7 +165,7 @@ export function buildBatArguments(
   language?: string,
 ): string[] {
   validateRange(startLine, endLine);
-  const args = [batPath, "--paging=always"];
+  const args = [batPath, "--paging=always", "--pager=/usr/bin/less -R"];
   if (language) {
     args.push(`--language=${language}`);
   }
@@ -178,6 +178,23 @@ export function buildBatArguments(
   return args;
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+export function buildGhosttyOpenArguments(command: string[]): string[] {
+  const commandLine = command.map(shellQuote).join(" ");
+  return [
+    "-na",
+    "Ghostty.app",
+    "--args",
+    "-e",
+    "/bin/sh",
+    "-lc",
+    `/bin/sleep 0.25; exec ${commandLine}`,
+  ];
+}
+
 async function launchGhostty(command: string[]): Promise<void> {
   if (process.platform === "darwin") {
     const check = Bun.spawn(["open", "-Ra", "Ghostty"], { stdout: "ignore", stderr: "pipe" });
@@ -187,14 +204,15 @@ async function launchGhostty(command: string[]): Promise<void> {
         "Ghostty.app is required. Install it with: brew install --cask ghostty",
       );
     }
-    const launch = Bun.spawn(["open", "-na", "Ghostty.app", "--args", "-e", ...command], {
+    const openArguments = buildGhosttyOpenArguments(command);
+    const launch = Bun.spawn(["open", ...openArguments], {
       stdout: "ignore",
       stderr: "pipe",
     });
     if ((await launch.exited) !== 0) {
       const stderr = (await new Response(launch.stderr).text()).trim();
       throw new TracerError("GHOSTTY_LAUNCH_FAILED", stderr || "Ghostty failed to open", {
-        command: ["open", "-na", "Ghostty.app", "--args", "-e", ...command],
+        command: ["open", ...openArguments],
         exit_code: launch.exitCode,
         stderr,
       });

@@ -74,8 +74,9 @@ git difftool
 }
 ```
 
-The server exposes four tools:
+The server exposes five tools:
 
+- `setup` returns a model prompt for a checklist-driven walkthrough based on Matt Pocock's `teach` skill, with non-media scope, code regions of at most 50 lines, retrieval checks, and learner confirmation before continuing. It does not mutate files.
 - `highlight_code_region` opens a local file range or the latest diff for a GitHub pull request in Ghostty. `bat` renders and highlights the content; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
 - `initialize_directory_checklist` writes the Git-respected file list to `.tracer/walkthrough.json` in the selected directory.
 - `mark_file_explained` atomically records that a file has been explained.

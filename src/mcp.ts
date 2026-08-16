@@ -11,6 +11,19 @@ import {
 import { highlightCodeRegion, TracerError } from "./viewer.ts";
 import { VERSION } from "./version.ts";
 
+const TEACHING_SETUP_PROMPT = `Use the installed teach skill from Matt Pocock's skills repository to guide this codebase walkthrough.
+
+Teaching protocol:
+1. Resolve the codebase root and initialize Tracer's directory checklist.
+2. Focus on source code, tests, configuration, CI, and behavioral documentation. Skip images, video, and promotional assets.
+3. Follow dependencies in an order that builds a coherent mental model.
+4. Show one conceptual code region at a time with highlight_code_region, using at most 50 lines.
+5. Explain only the concept needed for the learner's current level and mission.
+6. Ask one retrieval or understanding question, then wait for the learner's response before continuing.
+7. Give immediate corrective feedback. If the learner is unsure, explain the missing idea before moving on.
+8. Mark a file explained only after all relevant regions in that file are understood.
+9. Preserve progress through Tracer's checklist and continue until every relevant non-media file is complete.`;
+
 const responseSchema = {
   result: z.unknown().optional(),
   error: z
@@ -48,6 +61,18 @@ function failure(error: unknown) {
 export function createMcpServer(): McpServer {
   const server = new McpServer({ name: "tracer", version: VERSION });
   const viewerId = `tracer-${os.hostname()}-${process.pid}-${crypto.randomUUID().slice(0, 8)}`;
+
+  server.registerTool(
+    "setup",
+    {
+      title: "Set up codebase teaching",
+      description:
+        "Return model instructions for a Tracer walkthrough based on Matt Pocock's teach skill. This tool does not mutate files.",
+      inputSchema: {},
+      outputSchema: responseSchema,
+    },
+    async () => response({ prompt: TEACHING_SETUP_PROMPT }),
+  );
 
   server.registerTool(
     "highlight_code_region",

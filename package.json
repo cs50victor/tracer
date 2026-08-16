@@ -2,7 +2,7 @@
   "name": "@cs50victor/tracer",
   "module": "src/diff.tsx",
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "bin": {
     "tracer": "src/entry.ts"

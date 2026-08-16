@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1
+
+- mcp
+  - Prevent repeated Ghostty execution prompts when highlighting local files on macOS.
+  - Add a pure `setup` tool that returns a teach-skill walkthrough prompt.
+
 ## 0.1.0
 
 - mcp

@@ -2,13 +2,19 @@ import { describe, expect, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { acquireViewLease, buildBatArguments, pullRequestViewSource } from "../src/viewer.ts";
+import {
+  acquireViewLease,
+  buildBatArguments,
+  buildGhosttyOpenArguments,
+  pullRequestViewSource,
+} from "../src/viewer.ts";
 
 describe("bat command construction", () => {
   test("builds an inclusive local range with bounded context", () => {
     expect(buildBatArguments("/opt/homebrew/bin/bat", "/tmp/huge.ts", 100, 200, 20)).toEqual([
       "/opt/homebrew/bin/bat",
       "--paging=always",
+      "--pager=/usr/bin/less -R",
       "--line-range=80:220",
       "--highlight-line=100:200",
       "--",
@@ -20,6 +26,7 @@ describe("bat command construction", () => {
     expect(buildBatArguments("bat", "/tmp/pr.diff", undefined, undefined, 10, "diff")).toEqual([
       "bat",
       "--paging=always",
+      "--pager=/usr/bin/less -R",
       "--language=diff",
       "--",
       "/tmp/pr.diff",
@@ -29,6 +36,24 @@ describe("bat command construction", () => {
   test("rejects incomplete or reversed ranges", () => {
     expect(() => buildBatArguments("bat", "/tmp/file", 10)).toThrow("provided together");
     expect(() => buildBatArguments("bat", "/tmp/file", 20, 10)).toThrow("end_line >= start_line");
+  });
+});
+
+describe("Ghostty launch construction", () => {
+  test("keeps viewed files out of macOS open-file arguments", () => {
+    const sourcePath = "/tmp/source with 'quote.ts";
+    const args = buildGhosttyOpenArguments(["/opt/homebrew/bin/bat", "--", sourcePath]);
+
+    expect(args).toEqual([
+      "-na",
+      "Ghostty.app",
+      "--args",
+      "-e",
+      "/bin/sh",
+      "-lc",
+      "/bin/sleep 0.25; exec '/opt/homebrew/bin/bat' '--' '/tmp/source with '\"'\"'quote.ts'",
+    ]);
+    expect(args).not.toContain(sourcePath);
   });
 });
 
