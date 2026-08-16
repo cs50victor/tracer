@@ -5,6 +5,8 @@
 - mcp
   - Prevent repeated Ghostty execution prompts when highlighting local files on macOS.
   - Add a pure `setup` tool that returns a teach-skill walkthrough prompt.
+- distribution
+  - Grant the reusable npm publish job permission to issue provenance tokens.
 
 ## 0.1.0
 
