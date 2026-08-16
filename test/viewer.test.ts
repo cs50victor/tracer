@@ -37,7 +37,15 @@ describe("pull request identity", () => {
     expect(pullRequestViewSource("https://github.com/CS50Victor/Tracer/pull/42")).toBe(
       "github:cs50victor/tracer#42",
     );
+    expect(pullRequestViewSource("https://github.com/CS50Victor/Tracer/pull/42?diff=split")).toBe(
+      "github:cs50victor/tracer#42",
+    );
     expect(pullRequestViewSource("42", "CS50Victor/Tracer")).toBe("github:cs50victor/tracer#42");
+  });
+
+  test("does not normalize non-PR GitHub URLs", () => {
+    const input = "https://github.com/cs50victor/tracer/issues/42";
+    expect(pullRequestViewSource(input)).toBe(`github:${input}`);
   });
 });
 

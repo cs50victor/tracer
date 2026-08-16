@@ -264,9 +264,22 @@ async function pruneOldPreviews(): Promise<void> {
 
 export function pullRequestViewSource(pullRequest: string, repository?: string): string {
   const value = pullRequest.trim();
-  const url = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/i.exec(value);
-  if (url) {
-    return `github:${url[1]?.toLowerCase()}/${url[2]?.toLowerCase()}#${url[3]}`;
+  if (URL.canParse(value)) {
+    const url = new URL(value);
+    const [owner, repo, resource, numberText, ...extra] = url.pathname.split("/").filter(Boolean);
+    const pullRequestNumber = Number(numberText);
+    if (
+      url.origin === "https://github.com" &&
+      owner &&
+      repo &&
+      resource === "pull" &&
+      extra.length === 0 &&
+      Number.isSafeInteger(pullRequestNumber) &&
+      pullRequestNumber > 0 &&
+      String(pullRequestNumber) === numberText
+    ) {
+      return `github:${owner.toLowerCase()}/${repo.toLowerCase()}#${pullRequestNumber}`;
+    }
   }
   if (repository) {
     return `github:${repository.toLowerCase()}#${value}`;
