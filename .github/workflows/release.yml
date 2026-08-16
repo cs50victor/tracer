@@ -125,3 +125,8 @@ jobs:
             --target "${{ github.sha }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes
+
+  publish-npm:
+    needs: release
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
