@@ -28,7 +28,10 @@ bun install -g @cs50victor/tracer
 brew tap cs50victor/tap
 brew install tracer
 
-# Ghostty hosts code previews on macOS
+# Zed opens MCP code previews by default
+brew install --cask zed
+
+# Optional: Ghostty for highlighted terminal previews
 brew install --cask ghostty
 ```
 
@@ -77,7 +80,7 @@ git difftool
 The server exposes five tools:
 
 - `setup` returns a model prompt for a checklist-driven walkthrough based on Matt Pocock's `teach` skill, with non-media scope, code regions of at most 50 lines, retrieval checks, and learner confirmation before continuing. It does not mutate files.
-- `highlight_code_region` opens a local file range or the latest diff for a GitHub pull request in Ghostty. `bat` renders and highlights the content; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
+- `highlight_code_region` opens a local file or the latest GitHub pull request diff in Zed by default. It adds a tab to an existing Zed workspace with `zed --add`, reusing an existing tab for the same file. Set `editor: "ghostty"` for a terminal preview rendered and highlighted by `bat`; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
 - `initialize_directory_checklist` writes the Git-respected file list to `.tracer/walkthrough.json` in the selected directory.
 - `mark_file_explained` atomically records that a file has been explained.
 - `list_directory_checklist` returns open, done, or all files with pagination and aggregate counts.
@@ -86,7 +89,20 @@ Completion records are separate, exclusive-create JSON markers under `.tracer/ex
 
 Tool failures use structured JSON with `code`, `message`, and raw command details such as `stderr` and `exit_code` when available.
 
-The Homebrew formula installs `bat` and `gh`. Ghostty is a separate cask because Homebrew formulae cannot depend on graphical casks.
+For example, call `highlight_code_region` with:
+
+```json
+{
+  "target": "local",
+  "path": "/absolute/path/to/file.ts",
+  "start_line": 20,
+  "end_line": 40
+}
+```
+
+Omitting `editor` selects Zed. Zed jumps to `start_line` (or line 1); it does not select through `end_line` or restrict `context_lines`. Both line bounds must be supplied together. Add `"editor": "ghostty"` to highlight the inclusive range with surrounding context. For PR previews, line numbers refer to the fetched `.diff` file.
+
+The `zed` CLI must be on PATH. The Homebrew formula installs `bat` and `gh`; Zed and optional Ghostty are separate casks. Zed previews do not require `bat` or Ghostty.
 
 ## Navigation
 

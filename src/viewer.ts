@@ -4,10 +4,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 export type HighlightTarget = "local" | "pull_request";
+export type HighlightEditor = "zed" | "ghostty";
 
 export interface HighlightRequest {
   target: HighlightTarget;
   viewer_id: string;
+  editor?: HighlightEditor;
   path?: string;
   pull_request?: string;
   repository?: string;
@@ -19,6 +21,7 @@ export interface HighlightRequest {
 
 export interface HighlightResult {
   target: HighlightTarget;
+  editor: HighlightEditor;
   source: string;
   viewer_id: string;
   viewing_until: string;
@@ -230,6 +233,36 @@ async function launchGhostty(command: string[]): Promise<void> {
   ghosttyProcess.unref();
 }
 
+async function launchPreview(sourcePath: string, request: HighlightRequest): Promise<void> {
+  if (request.editor === "ghostty") {
+    const bat = await commandPath("bat");
+    await launchGhostty(buildBatArguments(
+      bat,
+      sourcePath,
+      request.start_line,
+      request.end_line,
+      request.context_lines,
+      request.target === "pull_request" ? "diff" : undefined,
+    ));
+    return;
+  }
+
+  const zed = await commandPath("zed");
+  const command = [zed, "--add", `${sourcePath}:${request.start_line ?? 1}`];
+  const launch = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+  const [exitCode, stderr] = await Promise.all([
+    launch.exited,
+    new Response(launch.stderr).text(),
+  ]);
+  if (exitCode !== 0) {
+    throw new TracerError("ZED_LAUNCH_FAILED", stderr.trim() || `Zed exited with ${exitCode}`, {
+      command,
+      exit_code: exitCode,
+      stderr,
+    });
+  }
+}
+
 async function capturePullRequestDiff(pullRequest: string, repository?: string): Promise<string> {
   const gh = await commandPath("gh");
   const args = [gh, "pr", "diff", pullRequest, "--color=never"];
@@ -307,7 +340,7 @@ export function pullRequestViewSource(pullRequest: string, repository?: string):
 
 export async function highlightCodeRegion(request: HighlightRequest): Promise<HighlightResult> {
   validateRange(request.start_line, request.end_line);
-  const bat = await commandPath("bat");
+  const editor = request.editor ?? "zed";
   await pruneOldPreviews();
 
   if (request.target === "local") {
@@ -327,21 +360,15 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
       throw new TracerError("NOT_A_FILE", `Path is not a file: ${request.path}`, { path: sourcePath });
     }
     const acquired = await acquireViewLease(sourcePath, request.viewer_id, request.lease_seconds);
-    const command = buildBatArguments(
-      bat,
-      sourcePath,
-      request.start_line,
-      request.end_line,
-      request.context_lines,
-    );
     try {
-      await launchGhostty(command);
+      await launchPreview(sourcePath, request);
     } catch (error) {
       await acquired.release();
       throw error;
     }
     return {
       target: "local",
+      editor,
       source: sourcePath,
       viewer_id: request.viewer_id,
       viewing_until: acquired.lease.expires_at,
@@ -357,21 +384,14 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
   let previewPath: string;
   try {
     previewPath = await capturePullRequestDiff(request.pull_request, request.repository);
-    const command = buildBatArguments(
-      bat,
-      previewPath,
-      request.start_line,
-      request.end_line,
-      request.context_lines,
-      "diff",
-    );
-    await launchGhostty(command);
+    await launchPreview(previewPath, request);
   } catch (error) {
     await acquired.release();
     throw error;
   }
   return {
     target: "pull_request",
+    editor,
     source: request.pull_request,
     viewer_id: request.viewer_id,
     viewing_until: acquired.lease.expires_at,

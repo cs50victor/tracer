@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- mcp
+  - Open local files and pull request diffs in Zed by default, with an explicit Ghostty option for range highlighting.
+
 ## 0.1.1
 
 - mcp

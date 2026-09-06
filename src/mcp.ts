@@ -79,9 +79,10 @@ export function createMcpServer(): McpServer {
     {
       title: "Highlight code region",
       description:
-        "Open a local file or the latest GitHub pull request diff in Ghostty using bat. Optional line bounds are inclusive.",
+        "Open a local file or the latest GitHub pull request diff in Zed by default, at start_line (or line 1). Set editor to ghostty for inclusive range highlighting with bat. Zed does not select the range or limit context. PR line bounds refer to the fetched diff.",
       inputSchema: {
         target: z.enum(["local", "pull_request"]),
+        editor: z.enum(["zed", "ghostty"]).default("zed"),
         path: z.string().optional().describe("Absolute or working-directory-relative local file path"),
         pull_request: z.string().optional().describe("GitHub PR URL or number"),
         repository: z.string().optional().describe("OWNER/REPO, required for a PR number outside its repository"),
