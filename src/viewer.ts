@@ -10,6 +10,7 @@ export interface HighlightRequest {
   target: HighlightTarget;
   viewer_id: string;
   editor?: HighlightEditor;
+  diff?: boolean;
   path?: string;
   pull_request?: string;
   repository?: string;
@@ -22,12 +23,14 @@ export interface HighlightRequest {
 export interface HighlightResult {
   target: HighlightTarget;
   editor: HighlightEditor;
+  diff: boolean;
   source: string;
   viewer_id: string;
   viewing_until: string;
   start_line?: number;
   end_line?: number;
   preview_path?: string;
+  baseline_path?: string;
 }
 
 export class TracerError extends Error {
@@ -233,7 +236,46 @@ async function launchGhostty(command: string[]): Promise<void> {
   ghosttyProcess.unref();
 }
 
-async function launchPreview(sourcePath: string, request: HighlightRequest): Promise<void> {
+async function createDiffPreview(sourcePath: string, startLine: number, endLine: number) {
+  const contents = await fs.readFile(sourcePath);
+  const lineStarts = contents.length ? [0] : [];
+  for (let offset = 0; offset < contents.length; offset += 1) {
+    if (contents[offset] === 10 && offset + 1 < contents.length) {
+      lineStarts.push(offset + 1);
+    }
+  }
+  const startOffset = lineStarts[startLine - 1];
+  if (startOffset === undefined || endLine > lineStarts.length) {
+    throw new TracerError("INVALID_LINE_RANGE", "Line range exceeds the file contents", {
+      start_line: startLine,
+      end_line: endLine,
+      line_count: lineStarts.length,
+    });
+  }
+  const endOffset = lineStarts[endLine] ?? contents.length;
+  const baseline = Buffer.concat([contents.subarray(0, startOffset), contents.subarray(endOffset)]);
+  const directory = path.join(os.homedir(), ".tracer", "previews");
+  await fs.mkdir(directory, { recursive: true });
+  const prefix = path.join(directory, `range-${crypto.randomUUID()}`);
+  const extension = path.extname(sourcePath);
+  const preview = {
+    baseline_path: `${prefix}.baseline${extension}`,
+    preview_path: `${prefix}.highlighted${extension}`,
+  };
+  try {
+    await fs.writeFile(preview.baseline_path, baseline, { flag: "wx" });
+    await fs.writeFile(preview.preview_path, contents, { flag: "wx" });
+  } catch (error) {
+    await Promise.all(Object.values(preview).map((file) => fs.rm(file, { force: true })));
+    throw error;
+  }
+  return preview;
+}
+
+async function launchPreview(
+  sourcePath: string,
+  request: HighlightRequest,
+): Promise<Pick<HighlightResult, "diff" | "preview_path" | "baseline_path">> {
   if (request.editor === "ghostty") {
     const bat = await commandPath("bat");
     await launchGhostty(buildBatArguments(
@@ -244,22 +286,37 @@ async function launchPreview(sourcePath: string, request: HighlightRequest): Pro
       request.context_lines,
       request.target === "pull_request" ? "diff" : undefined,
     ));
-    return;
+    return { diff: false };
   }
 
   const zed = await commandPath("zed");
-  const command = [zed, "--add", `${sourcePath}:${request.start_line ?? 1}`];
-  const launch = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
-  const [exitCode, stderr] = await Promise.all([
-    launch.exited,
-    new Response(launch.stderr).text(),
-  ]);
-  if (exitCode !== 0) {
-    throw new TracerError("ZED_LAUNCH_FAILED", stderr.trim() || `Zed exited with ${exitCode}`, {
-      command,
-      exit_code: exitCode,
-      stderr,
-    });
+  let preview: Awaited<ReturnType<typeof createDiffPreview>> | undefined;
+  try {
+    const command = [zed, "--add"];
+    if (request.diff !== false && request.start_line !== undefined && request.end_line !== undefined) {
+      preview = await createDiffPreview(sourcePath, request.start_line, request.end_line);
+      command.push("--diff", preview.baseline_path, `${preview.preview_path}:${request.start_line}`);
+    } else {
+      command.push(`${sourcePath}:${request.start_line ?? 1}`);
+    }
+    const launch = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+    const [exitCode, stderr] = await Promise.all([
+      launch.exited,
+      new Response(launch.stderr).text(),
+    ]);
+    if (exitCode !== 0) {
+      throw new TracerError("ZED_LAUNCH_FAILED", stderr.trim() || `Zed exited with ${exitCode}`, {
+        command,
+        exit_code: exitCode,
+        stderr,
+      });
+    }
+    return { diff: preview !== undefined, ...preview };
+  } catch (error) {
+    if (preview) {
+      await Promise.all(Object.values(preview).map((file) => fs.rm(file, { force: true })));
+    }
+    throw error;
   }
 }
 
@@ -360,8 +417,9 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
       throw new TracerError("NOT_A_FILE", `Path is not a file: ${request.path}`, { path: sourcePath });
     }
     const acquired = await acquireViewLease(sourcePath, request.viewer_id, request.lease_seconds);
+    let preview;
     try {
-      await launchPreview(sourcePath, request);
+      preview = await launchPreview(sourcePath, request);
     } catch (error) {
       await acquired.release();
       throw error;
@@ -369,6 +427,7 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
     return {
       target: "local",
       editor,
+      ...preview,
       source: sourcePath,
       viewer_id: request.viewer_id,
       viewing_until: acquired.lease.expires_at,
@@ -381,11 +440,13 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
   }
   const source = pullRequestViewSource(request.pull_request, request.repository);
   const acquired = await acquireViewLease(source, request.viewer_id, request.lease_seconds);
-  let previewPath: string;
+  let previewPath: string | undefined;
+  let preview;
   try {
     previewPath = await capturePullRequestDiff(request.pull_request, request.repository);
-    await launchPreview(previewPath, request);
+    preview = await launchPreview(previewPath, request);
   } catch (error) {
+    if (previewPath) await fs.rm(previewPath, { force: true });
     await acquired.release();
     throw error;
   }
@@ -396,6 +457,7 @@ export async function highlightCodeRegion(request: HighlightRequest): Promise<Hi
     viewer_id: request.viewer_id,
     viewing_until: acquired.lease.expires_at,
     preview_path: previewPath,
+    ...preview,
     ...(request.start_line ? { start_line: request.start_line, end_line: request.end_line } : {}),
   };
 }

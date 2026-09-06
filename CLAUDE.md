@@ -32,7 +32,7 @@ tracer pick <branch>               # Pick files from another branch
 - `src/cli.tsx` - Diff commands, React TUI app, navigation logic
 - `src/mcp.ts` - Stdio MCP server and tool contracts
 - `src/checklist.ts` - Concurrent JSON walkthrough state
-- `src/viewer.ts` - Zed previews by default, optional Ghostty/bat highlighting, and GitHub CLI diff fetching
+- `src/viewer.ts` - Zed snapshot range diffs by default (`diff: false` for plain files), optional Ghostty/bat highlighting, and GitHub CLI diff fetching
 - `src/diff.tsx` - Diff rendering with syntax highlighting (Shiki), word-level diffs, split view
 - `src/intelligent.tsx` - AI-powered diff analysis (Claude/Codex integration)
 

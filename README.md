@@ -80,7 +80,7 @@ git difftool
 The server exposes five tools:
 
 - `setup` returns a model prompt for a checklist-driven walkthrough based on Matt Pocock's `teach` skill, with non-media scope, code regions of at most 50 lines, retrieval checks, and learner confirmation before continuing. It does not mutate files.
-- `highlight_code_region` opens a local file or the latest GitHub pull request diff in Zed by default. It adds a tab to an existing Zed workspace with `zed --add`, reusing an existing tab for the same file. Set `editor: "ghostty"` for a terminal preview rendered and highlighted by `bat`; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
+- `highlight_code_region` opens a local file or the latest GitHub pull request diff in Zed by default. With line bounds, it opens a snapshot comparison that highlights the requested range as additions. Set `diff: false` to open the source file normally, or `editor: "ghostty"` for a terminal preview rendered and highlighted by `bat`; `gh` fetches each PR diff when requested. Tracer assigns each server process a viewer ID; competing views return a structured `VIEW_CONFLICT` with the current session and lease expiry.
 - `initialize_directory_checklist` writes the Git-respected file list to `.tracer/walkthrough.json` in the selected directory.
 - `mark_file_explained` atomically records that a file has been explained.
 - `list_directory_checklist` returns open, done, or all files with pagination and aggregate counts.
@@ -94,13 +94,21 @@ For example, call `highlight_code_region` with:
 ```json
 {
   "target": "local",
+  "editor": "zed",
+  "diff": true,
   "path": "/absolute/path/to/file.ts",
   "start_line": 20,
   "end_line": 40
 }
 ```
 
-Omitting `editor` selects Zed. Zed jumps to `start_line` (or line 1); it does not select through `end_line` or restrict `context_lines`. Both line bounds must be supplied together. Add `"editor": "ghostty"` to highlight the inclusive range with surrounding context. For PR previews, line numbers refer to the fetched `.diff` file.
+`editor` defaults to `"zed"` and `diff` defaults to `true`. With both line bounds, Tracer creates two temporary snapshots: an unchanged copy and a baseline with the inclusive range removed. Zed opens them with `--add --diff`, jumps to `start_line`, and colors the range as additions. The source stays untouched, and the unchanged snapshot preserves its line numbers. This is a generated comparison, not actual Git changes or a text selection; repeated identical lines can shift diff alignment.
+
+Set `"diff": false` to open the source directly with `zed --add path:start_line`, reusing an existing tab for the same file. Without line bounds, Zed opens the source at line 1 regardless of `diff`. Both bounds must be supplied together; snapshot comparisons reject ranges beyond the file's content lines. A trailing newline does not add an extra content line.
+
+`diff` applies only to Zed. With `"editor": "ghostty"`, `bat` highlights the inclusive range and shows surrounding `context_lines`. Zed always shows the full snapshot and ignores `context_lines`. For PR previews, line numbers refer to the fetched `.diff` file.
+
+Results report the applied `diff` mode and, for Zed comparisons, `preview_path` and `baseline_path`. Snapshots are stored under `~/.tracer/previews` and pruned after 24 hours when another preview is requested. Failed launches remove their snapshots.
 
 The `zed` CLI must be on PATH. The Homebrew formula installs `bat` and `gh`; Zed and optional Ghostty are separate casks. Zed previews do not require `bat` or Ghostty.
 
